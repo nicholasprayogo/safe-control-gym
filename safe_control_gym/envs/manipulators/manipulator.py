@@ -92,9 +92,8 @@ class BaseManipulator(BenchmarkEnv):
             #                                             linkIndex=link_index,
             #                                             computeLinkVelocity=True)
             # self._pb_client.stepSimulation()
-            # print("step")
         
-        # # complete
+        # # complete obs 
         # obs = self.link_states
         
         # only for 1 joint, 1 state
@@ -107,65 +106,5 @@ class BaseManipulator(BenchmarkEnv):
         return obs, reward, done, info 
     
     def reset(self):
-        obs = np.array([0.0, 0.0, 0.0, 0.0]) #TODO change acc to step 
-        # reward = random.choice(self.reward_space)
-        # info = {} 
-        # done = False 
+        obs = np.array([0.0, 0.0, 0.0, 0.0]) #TODO change to a reasonable reset point
         return obs
-    # from manipulator_learning.sim.envs.configs.panda_default import CONFIG
-    # from manipulator_learning.sim.robots.manipulator import Manipulator
-    
-    # make test scripts in separate folder 
-    
-    # torque and velocity 
-    # position : how to know the bounds.  
-    # single joint -> constraints
-    # multiple joints -> constraints
-    
-    # fix all the other joints, only move 1 joint 
-    
-    # control_mode = ["torque", "position", "velocity"]
-    
-    
-    # if end_effector -> apply inverse kinematics to translate to joint control 
-    
-    # example from manipulator_wrapper
-    
-    # action[0], action[1], action[2]
-    # :param t_command: Translational command.
-    # :param r_command: Rotational command. 3 floats for acc or vel command, 4 floats(xyzw quat) for pos.
-    # :param g_command: Gripper command.
-    # :param ref_frame: Reference frame for action. Should be t or b.
-    # :return:
-    
-    # # these aboe assume position control.
-    # # TODO should we make action variable generalize to all control modes 
-    # # or diff dimension each time 
-    
-    # action = {
-    #     "torque": [], 
-    #     "position": [],
-    #     "velocity": [] 
-    # }
-    
-    # _pb_client=p.connect(p.GUI)
-        # rc = CONFIG["robot_config"] 
-        # # urdf_path = "assets/franka_panda/panda.urdf"
-        # # urdf_path = rc["urdf_root"]
-        # ee_link_index = rc['ee_link_index']
-        # tool_link_index = rc['tool_link_index']
-        # gripper_indices = rc['gripper_indices']
-        # arm_indices = rc['arm_indices']
-        # control_method = "p"
-        # gripper_control_method = "p"
-        
-        # self.manipulator = Manipulator(self._pb_client,
-    #             urdf_path,
-    #             ee_link_index,
-    #             tool_link_index,
-    #             control_method,
-    #             gripper_control_method,
-    #             gripper_indices = gripper_indices,
-    #             arm_indices = arm_indices,
-    #             # base_constraint = base_constraint
-    #             )
