@@ -18,7 +18,23 @@ class BaseManipulator(BenchmarkEnv):
         self.urdf_path = urdf_path 
         self.robot = p.loadURDF(urdf_path)
         self.n_joints = self._pb_client.getNumJoints(self.robot) 
-        self.link_states = [[] for link in range(self.n_joints)]
+        
+        # self.link_states = [[] for link in range(self.n_joints)]
+        
+        # this might suite spaces.Dict more 
+        self.link_states = {
+            "position": [[] for link in range(self.n_joints)],
+            "orientation": [[] for link in range(self.n_joints)],
+            "linear_vel": [[] for link in range(self.n_joints)],
+            "angular_vel": [[] for link in range(self.n_joints)]
+        }
+        
+        self.state_indices_dict = {
+            "position": 4, 
+            "orientation": 5,
+            "linear_vel": 6,
+            "angular_vel": 7
+        }
         
         control_mode_dict = {
             "torque": p.TORQUE_CONTROL,
@@ -45,9 +61,24 @@ class BaseManipulator(BenchmarkEnv):
                             controlMode= self.control_mode, targetPosition = action
                     )
                 
-                self.link_states[link_index] = self._pb_client.getLinkState(self.robot,
-                                                        linkIndex=link_index,
-                                                        computeLinkVelocity=True)
+                link_state =  self._pb_client.getLinkState(self.robot,
+                                            linkIndex=link_index,
+                                            computeLinkVelocity=True)
+                
+                for state_key, state_index in self.state_indices_dict.items(): 
+                    self.link_states[state_key][link_index] = link_state[state_index]
+                    
+                # # only extract world positions
+                
+                # # this one for list of dict style, but spaces respect dict of list more 
+                # link_states_dict = {
+                #     "position": link_states[4],
+                #     "orientation": link_states[5],
+                #     "linear_vel": link_states[6],
+                #     "angular_vel": link_states[7]
+                # }
+                # self.link_states[link_index] = link_states_dict
+            
             self._pb_client.stepSimulation()
             
             ## single action
@@ -63,13 +94,24 @@ class BaseManipulator(BenchmarkEnv):
             # self._pb_client.stepSimulation()
             # print("step")
         
-        obs = self.link_states
+        # # complete
+        # obs = self.link_states
+        
+        # only for 1 joint, 1 state
+        obs = self.link_states["orientation"][6]
+        
         reward = random.choice(self.reward_space)
         info = {} 
         done = False 
         
         return obs, reward, done, info 
-        
+    
+    def reset(self):
+        obs = np.array([0.0, 0.0, 0.0, 0.0]) #TODO change acc to step 
+        # reward = random.choice(self.reward_space)
+        # info = {} 
+        # done = False 
+        return obs
     # from manipulator_learning.sim.envs.configs.panda_default import CONFIG
     # from manipulator_learning.sim.robots.manipulator import Manipulator
     
