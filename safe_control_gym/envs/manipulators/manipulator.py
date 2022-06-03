@@ -4,6 +4,8 @@ import numpy as np
 import pybullet as p
 from pybullet_utils.bullet_client import BulletClient
 from safe_control_gym.envs.benchmark_env import BenchmarkEnv
+from safe_control_gym.envs.benchmark_env import Cost, Task
+from gym import spaces 
 
 class BaseManipulator(BenchmarkEnv):
     NAME = "manipulator"
@@ -11,25 +13,38 @@ class BaseManipulator(BenchmarkEnv):
     def __init__(self, 
                 urdf_path, 
                 control_mode,
-                target_space 
+                target_space, 
+                controlled_joint_indices = None, 
+                observed_link_indices = None, 
+                observed_link_state_keys = None,
+                **kwargs 
                 ):
         
         self._pb_client = BulletClient(connection_mode=p.GUI)
         self.urdf_path = urdf_path 
         self.robot = p.loadURDF(urdf_path)
         self.n_joints = self._pb_client.getNumJoints(self.robot) 
-        
+        self.n_links = self.n_joints
         # self.link_states = [[] for link in range(self.n_joints)]
         
+        # if controlled_joint_indices:
+        #     # only 1 joint
+        #     link_state_placeholder = [[]]
+        # else:
+        link_state_placeholder = [[] for link in range(self.n_links)]
+            
         # this might suite spaces.Dict more 
         self.link_states = {
-            "position": [[] for link in range(self.n_joints)],
-            "orientation": [[] for link in range(self.n_joints)],
-            "linear_vel": [[] for link in range(self.n_joints)],
-            "angular_vel": [[] for link in range(self.n_joints)]
+            "position": link_state_placeholder,
+            "orientation": link_state_placeholder,
+            "linear_vel": link_state_placeholder,
+            "angular_vel": link_state_placeholder
         }
         
-        self.state_indices_dict = {
+        # based on getLinkStates
+        # only take world frame. perhaps need base and local frame too?
+        # from https://docs.google.com/document/d/10sXEhzFRSnvFcl3XxNGhnD4N2SedqwdAvK3dsihxVUA/edit#heading=h.3v8gjd1epcrt
+        self.state_key_indices_dict = {
             "position": 4, 
             "orientation": 5,
             "linear_vel": 6,
@@ -41,64 +56,110 @@ class BaseManipulator(BenchmarkEnv):
             "position": p.POSITION_CONTROL,
             "velocity": p.VELOCITY_CONTROL
         }
-        
+    
         self.control_mode = control_mode_dict[control_mode]
         self.target_space = target_space # ["end_effector", "joints"] 
         self.reward_space = [5, 10, 15] # TODO properly define 
         
-    def step(self, action_list):
+        self.controlled_joint_indices = controlled_joint_indices
+        self.observed_link_indices = observed_link_indices # TODO extend these to list
+        self.observed_link_state_keys = observed_link_state_keys # which link state to keep track
+        
+        if not self.observed_link_indices:
+            self.observed_link_indices = range(self.n_links)
+        
+        if not self.controlled_joint_indices:
+            self.observed_link_indices = range(self.n_joints)
+            
+        #TODO use benchmark_env later 
+        self.cost = kwargs["cost"]
+        #TODO temporary solution
+        # self.action_space = action_space 
+        # self.observation_space = observation_space 
+        # super().__init__(**kwargs)
+        
+    #TODO wanna make this as flexible? use diff action and obs space?
+    # def _set_action_space(self, ):
+    #     self.action_space = spaces.Box(-500, 500, (self.n_joints,), dtype=np.float32)
+        
+    # def _set_observation_space(self):
+    #     self.observation_space = spaces.Box(-np.inf, np.inf, (4,), dtype=np.float32)
+    
+    def _joint_apply_action(self, joint_index, action):
+        if self.control_mode == p.TORQUE_CONTROL:
+            self._pb_client.setJointMotorControl2(self.robot, jointIndex=joint_index,
+                    controlMode= self.control_mode, force=action
+            )
+        elif self.control_mode == p.POSITION_CONTROL:
+            self._pb_client.setJointMotorControl2(self.robot, jointIndex=joint_index,
+                    controlMode= self.control_mode, targetPosition = action
+            )
+        
+    def _link_get_state(self, link_index):
+        link_state =  self._pb_client.getLinkState(
+            self.robot,
+            linkIndex=link_index,
+            computeLinkVelocity=True
+            )
+        return link_state 
+    
+    def _link_update_state(self, link_index, link_state):
+        for state_key, state_index in self.state_key_indices_dict.items(): 
+            self.link_states[state_key][link_index] = link_state[state_index]
+    
+    def _get_observation(self):
+        for link_state_key in self.observed_link_state_keys:
+            for link_index in self.observed_link_indices:
+                link_state = self._link_get_state(link_index)
+                self._link_update_state(link_index, link_state)
+                obs = self.link_states[link_state_key][link_index]
+                
+                #TODO observation space might vary depending on size of observed_link_indices observed_link_state_key
+                return obs 
+        
+        # if self.observed_link_indices:
+        #     # TODO might want to distinguish which joint to control and which joint/end-effector position to monitor
+        #     link_state = self._link_get_state(self.observed_link_indices)
+        #     self._link_update_state(link_index, link_state)
+            
+        #     obs = self.link_states[self.observed_link_state_key][self.observed_link_indices]
+        #     return obs 
+        
+        # else: 
+        #     for link_index in range(self.n_links):
+        #         link_state = self._link_get_state(link_index)
+        #         self._link_update_state(link_index, link_state)
+                
+        #     obs = self.link_states[self.observed_link_state_key]
+        #     return obs 
+        
+    # def _get_reward(self):
+    #     if self.COST == Cost.RL_REWARD:
+    #         state = 
+            
+    def step(self, action_list:np.array):
         assert len(action_list) == self.n_joints, "size of action_list not equal to n_joints"
         
         if self.target_space == "joint":
-            for action_index, action in enumerate(action_list):
-                link_index = action_index
-                if self.control_mode == p.TORQUE_CONTROL:
-                    self._pb_client.setJointMotorControl2(self.robot, jointIndex=action_index,
-                            controlMode= self.control_mode, force=action
-                    )
-                elif self.control_mode == p.POSITION_CONTROL:
-                    self._pb_client.setJointMotorControl2(self.robot, jointIndex=action_index,
-                            controlMode= self.control_mode, targetPosition = action
-                    )
-                
-                link_state =  self._pb_client.getLinkState(self.robot,
-                                            linkIndex=link_index,
-                                            computeLinkVelocity=True)
-                
-                for state_key, state_index in self.state_indices_dict.items(): 
-                    self.link_states[state_key][link_index] = link_state[state_index]
-                    
-                # # only extract world positions
-                
-                # # this one for list of dict style, but spaces respect dict of list more 
-                # link_states_dict = {
-                #     "position": link_states[4],
-                #     "orientation": link_states[5],
-                #     "linear_vel": link_states[6],
-                #     "angular_vel": link_states[7]
-                # }
-                # self.link_states[link_index] = link_states_dict
+            # if self.controlled_joint_indices:
+            #     action = action_list[self.controlled_joint_indices]
+            #     self._joint_apply_action(self.controlled_joint_indices, action)
+            # else: 
+            #     for joint_index, action in enumerate(action_list):
+            #         self._joint_apply_action(joint_index, action)
+
+            for joint_index in self.controlled_joint_indices:
+                action = action_list[joint_index]
+                self._joint_apply_action(joint_index, action)
             
             self._pb_client.stepSimulation()
-            
-            ## single action
-            # action_index = 2
-            # action = action_list[action_index]
-            # link_index = action_index
-            # self._pb_client.setJointMotorControl2(self.robot, jointIndex=action_index,
-            #                 controlMode= self.control_mode, targetPosition = action
-            #         )
-            # self.link_states[link_index] = self._pb_client.getLinkState(self.robot,
-            #                                             linkIndex=link_index,
-            #                                             computeLinkVelocity=True)
-            # self._pb_client.stepSimulation()
-        
+    
         # # complete obs 
-        # obs = self.link_states
+        obs = self._get_observation()
         
         # only for 1 joint, 1 state
-        obs = self.link_states["orientation"][6]
-        
+        # obs = self.link_states["position"][6]
+
         reward = random.choice(self.reward_space)
         info = {} 
         done = False 
