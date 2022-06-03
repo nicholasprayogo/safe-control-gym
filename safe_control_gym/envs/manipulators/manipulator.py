@@ -17,6 +17,8 @@ class BaseManipulator(BenchmarkEnv):
                 controlled_joint_indices = None, 
                 observed_link_indices = None, 
                 observed_link_state_keys = None,
+                goal = None, 
+                goal_type = None, 
                 **kwargs 
                 ):
         
@@ -72,7 +74,10 @@ class BaseManipulator(BenchmarkEnv):
             self.observed_link_indices = range(self.n_joints)
             
         #TODO use benchmark_env later 
-        self.cost = kwargs["cost"]
+        self.COST = kwargs["cost"]
+        
+        self.goal = goal 
+        self.goal_type = goal_type # point, trajectory, etc
         #TODO temporary solution
         # self.action_space = action_space 
         # self.observation_space = observation_space 
@@ -104,18 +109,25 @@ class BaseManipulator(BenchmarkEnv):
         return link_state 
     
     def _link_update_state(self, link_index, link_state):
-        for state_key, state_index in self.state_key_indices_dict.items(): 
+        #TODO update all not just observed?
+        for state_key in self.observed_link_state_keys: 
+            state_index = self.state_key_indices_dict[state_key]
             self.link_states[state_key][link_index] = link_state[state_index]
     
     def _get_observation(self):
+        
         for link_state_key in self.observed_link_state_keys:
             for link_index in self.observed_link_indices:
                 link_state = self._link_get_state(link_index)
                 self._link_update_state(link_index, link_state)
-                obs = self.link_states[link_state_key][link_index]
                 
-                #TODO observation space might vary depending on size of observed_link_indices observed_link_state_key
-                return obs 
+        # TODO expand obs to multidimension later
+        obs = self.link_states[link_state_key][link_index]
+        
+        # ValueError: Error: Unexpected observation shape (4,) for Box environment, please use (1, 4) or (n_env, 1, 4) for the observation shape.
+        # obs = np.expand_dims(obs, axis=0)
+        #TODO observation space might vary depending on size of observed_link_indices observed_link_state_key
+        return obs 
         
         # if self.observed_link_indices:
         #     # TODO might want to distinguish which joint to control and which joint/end-effector position to monitor
@@ -133,39 +145,52 @@ class BaseManipulator(BenchmarkEnv):
         #     obs = self.link_states[self.observed_link_state_key]
         #     return obs 
         
-    # def _get_reward(self):
-    #     if self.COST == Cost.RL_REWARD:
-    #         state = 
+    def _get_reward(self):
+        # TODO generalize so that can read dict goal for multiple state keys and links
+    
+        # example goal:
+        # goal = [{
+        #     "position": [None, None, 2, None, ...],
+        #     "orientation": [None, None, 2, None, ...]
+        # }, {
+        #     "position": [None, None, 2, None, ...],
+        #     "orientation": [None, None, 2, None, ...]
+        # }]
+        
+        # trajectory 
+        
+        reward = 0 
+        
+        if self.COST == Cost.RL_REWARD:
+            for state_key in self.observed_link_state_keys:
+                for link_index in self.observed_link_indices:
+                    goal = np.array(self.goal[0][state_key][link_index]) #TODO this is for point tracking only
+                    state = np.array(self.link_states[state_key][link_index])
+                    # rmse = np.sqrt(np.mean((goal-state)**2))
+                    loss = np.sum(abs(goal-state))
+                    reward -= loss
+        
+        return reward 
             
     def step(self, action_list:np.array):
         assert len(action_list) == self.n_joints, "size of action_list not equal to n_joints"
         
         if self.target_space == "joint":
-            # if self.controlled_joint_indices:
-            #     action = action_list[self.controlled_joint_indices]
-            #     self._joint_apply_action(self.controlled_joint_indices, action)
-            # else: 
-            #     for joint_index, action in enumerate(action_list):
-            #         self._joint_apply_action(joint_index, action)
-
             for joint_index in self.controlled_joint_indices:
                 action = action_list[joint_index]
                 self._joint_apply_action(joint_index, action)
             
             self._pb_client.stepSimulation()
     
-        # # complete obs 
         obs = self._get_observation()
-        
-        # only for 1 joint, 1 state
-        # obs = self.link_states["position"][6]
-
-        reward = random.choice(self.reward_space)
+        # reward = random.choice(self.reward_space)
+        reward = self._get_reward()
         info = {} 
         done = False 
         
         return obs, reward, done, info 
     
     def reset(self):
-        obs = np.array([0.0, 0.0, 0.0, 0.0]) #TODO change to a reasonable reset point
+        obs = self._get_observation()
+        # obs = np.array([0.0, 0.0, 0.0, 0.0]) #TODO change to a reasonable reset point
         return obs
