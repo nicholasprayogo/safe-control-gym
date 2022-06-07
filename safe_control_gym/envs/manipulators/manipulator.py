@@ -1,3 +1,4 @@
+from email import policy
 import os
 import random
 import numpy as np 
@@ -78,6 +79,8 @@ class BaseManipulator(BenchmarkEnv):
         
         self.goal = goal 
         self.goal_type = goal_type # point, trajectory, etc
+        
+        self.MIN_TORQUE_POLICY = 2
         #TODO temporary solution
         # self.action_space = action_space 
         # self.observation_space = observation_space 
@@ -129,34 +132,8 @@ class BaseManipulator(BenchmarkEnv):
         #TODO observation space might vary depending on size of observed_link_indices observed_link_state_key
         return obs 
         
-        # if self.observed_link_indices:
-        #     # TODO might want to distinguish which joint to control and which joint/end-effector position to monitor
-        #     link_state = self._link_get_state(self.observed_link_indices)
-        #     self._link_update_state(link_index, link_state)
-            
-        #     obs = self.link_states[self.observed_link_state_key][self.observed_link_indices]
-        #     return obs 
-        
-        # else: 
-        #     for link_index in range(self.n_links):
-        #         link_state = self._link_get_state(link_index)
-        #         self._link_update_state(link_index, link_state)
-                
-        #     obs = self.link_states[self.observed_link_state_key]
-        #     return obs 
-        
     def _get_reward(self):
         # TODO generalize so that can read dict goal for multiple state keys and links
-    
-        # example goal:
-        # goal = [{
-        #     "position": [None, None, 2, None, ...],
-        #     "orientation": [None, None, 2, None, ...]
-        # }, {
-        #     "position": [None, None, 2, None, ...],
-        #     "orientation": [None, None, 2, None, ...]
-        # }]
-        
         # trajectory 
         
         reward = 0 
@@ -169,16 +146,17 @@ class BaseManipulator(BenchmarkEnv):
                     # rmse = np.sqrt(np.mean((goal-state)**2))
                     loss = np.sum(abs(goal-state))
                     reward -= loss
-        
+        reward = reward*1000
         return reward 
-            
+
     def step(self, action_list:np.array):
-        assert len(action_list) == self.n_joints, "size of action_list not equal to n_joints"
-        
         if self.target_space == "joint":
-            for joint_index in self.controlled_joint_indices:
-                action = action_list[joint_index]
-                self._joint_apply_action(joint_index, action)
+            assert len(action_list) == len(self.controlled_joint_indices), "size of action_list not equal to controlled_joint_indices"
+            for action_list_index, joint_index in enumerate(self.controlled_joint_indices):
+                action = action_list[action_list_index]
+                if action!=None: 
+                    applied_action = self._action_mapping_torque(action) 
+                self._joint_apply_action(joint_index, applied_action)
             
             self._pb_client.stepSimulation()
     
@@ -190,7 +168,19 @@ class BaseManipulator(BenchmarkEnv):
         
         return obs, reward, done, info 
     
+    def _action_mapping_torque(self, policy_action):
+        # apply action reprojection 
+        if policy_action>=0 and policy_action<=self.MIN_TORQUE_POLICY:
+            applied_action = self.MIN_TORQUE_POLICY * 100
+        elif policy_action<=0 and policy_action>=-self.MIN_TORQUE_POLICY:
+            applied_action = -self.MIN_TORQUE_POLICY * 100
+        elif policy_action > self.MIN_TORQUE_POLICY or policy_action < -self.MIN_TORQUE_POLICY:
+            applied_action = policy_action  * 100 
+        
+        return applied_action
+            
     def reset(self):
+        #TODO still not sure how to do reset properly
         obs = self._get_observation()
         # obs = np.array([0.0, 0.0, 0.0, 0.0]) #TODO change to a reasonable reset point
         return obs
