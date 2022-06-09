@@ -80,7 +80,8 @@ class BaseManipulator(BenchmarkEnv):
         self.goal = goal 
         self.goal_type = goal_type # point, trajectory, etc
         
-        self.MIN_TORQUE_POLICY = 2
+        self.MIN_TORQUE_POLICY = 3
+        self.tolerance = -15
         #TODO temporary solution
         # self.action_space = action_space 
         # self.observation_space = observation_space 
@@ -127,6 +128,13 @@ class BaseManipulator(BenchmarkEnv):
         # TODO expand obs to multidimension later
         obs = self.link_states[link_state_key][link_index]
         
+        goal = np.array(self.goal[0][self.observed_link_state_keys[0]][link_index])
+        obs = list(obs) 
+        
+        for i in goal:
+            obs.append(i)
+        
+        obs = np.array(obs)
         # ValueError: Error: Unexpected observation shape (4,) for Box environment, please use (1, 4) or (n_env, 1, 4) for the observation shape.
         # obs = np.expand_dims(obs, axis=0)
         #TODO observation space might vary depending on size of observed_link_indices observed_link_state_key
@@ -149,6 +157,13 @@ class BaseManipulator(BenchmarkEnv):
         reward = reward*1000
         return reward 
 
+    def _get_done(self):
+        reward = self._get_reward()
+        if reward > self.tolerance:
+            return True 
+        else:
+            return False 
+        
     def step(self, action_list:np.array):
         if self.target_space == "joint":
             assert len(action_list) == len(self.controlled_joint_indices), "size of action_list not equal to controlled_joint_indices"
@@ -164,7 +179,7 @@ class BaseManipulator(BenchmarkEnv):
         # reward = random.choice(self.reward_space)
         reward = self._get_reward()
         info = {} 
-        done = False 
+        done = self._get_done() 
         
         return obs, reward, done, info 
     
@@ -180,7 +195,9 @@ class BaseManipulator(BenchmarkEnv):
         return applied_action
             
     def reset(self):
-        #TODO still not sure how to do reset properly
+        #TODO are these enough? 
+        p.resetSimulation()
+        self.robot = p.loadURDF(self.urdf_path)
         obs = self._get_observation()
         # obs = np.array([0.0, 0.0, 0.0, 0.0]) #TODO change to a reasonable reset point
         return obs
