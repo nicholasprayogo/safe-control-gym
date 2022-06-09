@@ -20,7 +20,8 @@ def main():
     }]
 
     # orientation_goal = [0.603, 0.3687, -0.3697, 0.6026]
-    position_goal = [0.03692, 0, 0.973]
+    # position_goal = [0.03692, 0, 0.973]
+    position_goal = [-0.127, 0.0, 1.012]
     # position_goal = [0.0, 0, 1]
     goal[0]["position"][observed_link_indices[0]] = position_goal
     goal_type = "point"
@@ -37,51 +38,36 @@ def main():
         cost = Cost.RL_REWARD
     )
     
-    policy = "A2C"
+    dim_dict = {
+        "position":3 + 3,
+        "orientation" : 4+4
+    }
+    env.action_space = spaces.Box(-4.5, 4.5, (len(env.controlled_joint_indices),), dtype=np.float32)
+
+    # TODO expand to multiple state keys 
+    env.observation_space = spaces.Box(-np.inf, np.inf, (dim_dict[observed_link_state_keys[0]], ), dtype=np.float32)
+
+    ppo_model = PPO('MlpPolicy', env, verbose=1)
+    ppo_model.learn(total_timesteps=10000)
     
-    if policy == "random":
-        # # torques 
-        action_space = [50, 100, 200, 400]
-
-        for i in range(50):
-            # action_index = env.n_joints- 2
-            action_index = 2 
-            action_list = np.zeros(env.n_joints)
-            action_list[action_index] = random.choice(action_space)    
-            obs, reward, done, info = env.step(action_list)
-            
-            if i%5== 0 :
-                print(f"position: {obs[action_index][5]}") # link position
-                print(f"angular velocity: {obs[action_index][-1]}") # velocity
-                        
-            sleep(0.1)
-            
-    else:
-        # model = PPO('MultiInputPolicy', env, verbose=1)
-        # model.learn(total_timesteps=10)
-        # env = gym.make('CartPole-v1')
+    obs = env.reset()
+    for i in range(500):
+        action, _state = ppo_model.predict(obs, deterministic=False)
+        # print(_state)
+        obs, reward, done, info = env.step(action)
         
-        #TODO action 0 for other joints except 1 
-        env.action_space = spaces.Box(300, 400, (env.n_joints,), dtype=np.float32)
-        env.observation_space = spaces.Box(-np.inf, np.inf, (4,), dtype=np.float32)
-
-        model = PPO('MlpPolicy', env, verbose=1)
-        model.learn(total_timesteps=10)
-        obs = env.reset()
-        
-        for i in range(100):
-            action, _state = model.predict(obs, deterministic=False)
-            print(_state) 
-            obs, reward, done, info = env.step(action)
-            applied_action = env._action_mapping_torque(action)
-            
+        if i%5==0:
             print(f"Iteration:{i}")
             print(f"action: {action}")
             print(f"goal: {goal[0]['position'][7]}")
             print(f"state: {[round(ob,3) for ob in obs]}")
             print(f"reward: {reward}\n")
-            
-            sleep(0.05)
+        
+        if done: 
+            print("done")
+            break
+        
+        sleep(0.05)
 
 if __name__ == "__main__":
     main()
