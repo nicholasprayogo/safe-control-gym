@@ -6,7 +6,11 @@ import pybullet as p
 from pybullet_utils.bullet_client import BulletClient
 from safe_control_gym.envs.benchmark_env import BenchmarkEnv
 from safe_control_gym.envs.benchmark_env import Cost, Task
+from safe_control_gym.math_and_models.symbolic_systems import SymbolicModel
+
 from gym import spaces 
+import casadi as cs
+#TODO _generate_point_goal on BenchmarkEnv
 
 class BaseManipulator(BenchmarkEnv):
     NAME = "manipulator"
@@ -18,12 +22,19 @@ class BaseManipulator(BenchmarkEnv):
                 controlled_joint_indices = None, 
                 observed_link_indices = None, 
                 observed_link_state_keys = None,
-                goal = None, 
+                goal = None,
                 goal_type = None, 
+                connection = "GUI",
                 **kwargs 
                 ):
         
-        self._pb_client = BulletClient(connection_mode=p.GUI)
+        if connection=="GUI":
+            connection_mode = p.GUI
+        
+        else:
+            connection_mode = p.DIRECT
+            
+        self._pb_client = BulletClient(connection_mode=connection_mode)
         self.urdf_path = urdf_path 
         self.robot = p.loadURDF(urdf_path)
         self.n_joints = self._pb_client.getNumJoints(self.robot) 
@@ -47,9 +58,16 @@ class BaseManipulator(BenchmarkEnv):
         # based on getLinkStates
         # only take world frame. perhaps need base and local frame too?
         # from https://docs.google.com/document/d/10sXEhzFRSnvFcl3XxNGhnD4N2SedqwdAvK3dsihxVUA/edit#heading=h.3v8gjd1epcrt
+        # self.state_key_indices_dict = {
+        #     "position": 4, 
+        #     "orientation": 5,
+        #     "linear_vel": 6,
+        #     "angular_vel": 7
+        # }
+        
         self.state_key_indices_dict = {
-            "position": 4, 
-            "orientation": 5,
+            "position": 0, 
+            "orientation": 1,
             "linear_vel": 6,
             "angular_vel": 7
         }
@@ -82,9 +100,13 @@ class BaseManipulator(BenchmarkEnv):
         
         self.MIN_TORQUE_POLICY = 3
         self.tolerance = -15
+        
         #TODO temporary solution
         # self.action_space = action_space 
         # self.observation_space = observation_space 
+        
+        # TODO later combine with goal
+        self.X_GOAL = np.array(goal)
         # super().__init__(**kwargs)
         
     #TODO wanna make this as flexible? use diff action and obs space?
@@ -158,6 +180,7 @@ class BaseManipulator(BenchmarkEnv):
         return reward 
 
     def _get_done(self):
+        #TODO time limit, boundary limit
         reward = self._get_reward()
         if reward > self.tolerance:
             return True 
@@ -201,3 +224,49 @@ class BaseManipulator(BenchmarkEnv):
         obs = self._get_observation()
         # obs = np.array([0.0, 0.0, 0.0, 0.0]) #TODO change to a reasonable reset point
         return obs
+
+    def _setup_symbolic(self):
+        if self.control_mode == p.TORQUE_CONTROL:
+            # single joint 
+            
+            # use pendulum formula for now
+            
+            g = self.GRAVITY_ACC
+            dt = self.CTRL_TIMESTEP
+            mc = 0.5
+            ma = 0.5
+            # TODO express in terms of actual length (distance b.w 2 joints)
+            l = 1
+            I = 0 # moment of inertia from gears and motors
+            
+            # must match dimension of X_GOAL and U_GOAL
+            nx = 1
+            nu = 1 
+            
+            x_x = cs.MX.sym('x_x')
+            x_y = cs.MX.sym('x_y')
+            x_z = cs.MX.sym('x_z')
+            theta = cs.MX.sym('theta')
+            U = cs.MX.sym('U') # torque
+            theta_dot_dot = cs.MX.sym("tdotdot")
+            Theta_dot_dot = cs.vertcat(theta_dot_dot, (U-(mc/2+ma)*g*l*cs.sin(theta))/((mc/3 + ma)*l^2+I))
+            
+            # not sure
+            X = cs.vertcat(x_x, x_y, x_z)
+            Y = cs.vertcat(x_x, x_y, x_z)
+            
+            Q = cs.MX.sym('Q', nx, nx)
+            R = cs.MX.sym('R', nu, nu)
+        
+            Xr = cs.MX.sym('Xr', nx, 1)
+            Ur = cs.MX.sym('Ur', nu, 1)
+
+            cost_func = 0.5 * (X - Xr).T @ Q @ (X - Xr) + 0.5 * (U - Ur).T @ R @ (U - Ur)
+            
+            dynamics = {"dyn_eqn": Theta_dot_dot, "obs_eqn": Y, "vars": {"X": X, "U": U}}
+            cost = {"cost_func": cost_func, "vars": {"X": X, "U": U, "Xr": Xr, "Ur": Ur, "Q": Q, "R": R}}
+            self.symbolic = SymbolicModel(dynamics=dynamics, cost=cost, dt=dt)
+            
+            # lqr uses fc_func 
+            # https://web.casadi.org/python-api/#function 
+        pass
