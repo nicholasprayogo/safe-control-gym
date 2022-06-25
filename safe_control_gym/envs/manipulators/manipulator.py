@@ -17,18 +17,20 @@ class BaseManipulator(BenchmarkEnv):
     
     def __init__(self, 
                 urdf_path, 
-                control_mode,
+                controlled_variable,
+                control_method,
                 target_space, 
-                controlled_joint_indices = None, 
-                observed_link_indices = None, 
-                observed_link_state_keys = None,
-                goal = None,
-                goal_type = None, 
+                controlled_joint_indices, 
+                observed_link_indices, 
+                observed_link_state_keys,
+                goal,
+                goal_type, 
+                dimensions,
                 connection = "GUI",
                 **kwargs 
                 ):
         
-        if connection=="GUI":
+        if connection.lower()=="gui":
             connection_mode = p.GUI
         
         else:
@@ -72,13 +74,13 @@ class BaseManipulator(BenchmarkEnv):
             "angular_vel": 7
         }
         
-        control_mode_dict = {
+        controlled_variable_dict = {
             "torque": p.TORQUE_CONTROL,
             "position": p.POSITION_CONTROL,
             "velocity": p.VELOCITY_CONTROL
         }
     
-        self.control_mode = control_mode_dict[control_mode]
+        self.controlled_variable = controlled_variable_dict[controlled_variable]
         self.target_space = target_space # ["end_effector", "joints"] 
         self.reward_space = [5, 10, 15] # TODO properly define 
         
@@ -107,23 +109,35 @@ class BaseManipulator(BenchmarkEnv):
         
         # TODO later combine with goal
         self.X_GOAL = np.array(goal)
-        # super().__init__(**kwargs)
+        self.U_GOAL = np.array([200]) 
+        
+        self.dimensions = dimensions
+        self.control_method = control_method 
+        
+        self.GRAVITY_ACC = 9.8
+        super().__init__(**kwargs)
+        self._setup_symbolic()
+        
         
     #TODO wanna make this as flexible? use diff action and obs space?
-    # def _set_action_space(self, ):
-    #     self.action_space = spaces.Box(-500, 500, (self.n_joints,), dtype=np.float32)
+    def _set_action_space(self, ):
+        self.action_space = spaces.Box(-4.5, 4.5, (len(self.controlled_joint_indices),), dtype=np.float32)
         
-    # def _set_observation_space(self):
-    #     self.observation_space = spaces.Box(-np.inf, np.inf, (4,), dtype=np.float32)
+    def _set_observation_space(self):
+        dim_dict = {
+            "position":3 + 3,
+            "orientation" : 4+4
+        }
+        self.observation_space = spaces.Box(-np.inf, np.inf, (dim_dict[self.observed_link_state_keys[0]], ), dtype=np.float32)
     
     def _joint_apply_action(self, joint_index, action):
-        if self.control_mode == p.TORQUE_CONTROL:
+        if self.controlled_variable == p.TORQUE_CONTROL:
             self._pb_client.setJointMotorControl2(self.robot, jointIndex=joint_index,
-                    controlMode= self.control_mode, force=action
+                    controlMode= self.controlled_variable, force=action
             )
-        elif self.control_mode == p.POSITION_CONTROL:
+        elif self.controlled_variable == p.POSITION_CONTROL:
             self._pb_client.setJointMotorControl2(self.robot, jointIndex=joint_index,
-                    controlMode= self.control_mode, targetPosition = action
+                    controlMode= self.controlled_variable, targetPosition = action
             )
         
     def _link_get_state(self, link_index):
@@ -150,7 +164,17 @@ class BaseManipulator(BenchmarkEnv):
         # TODO expand obs to multidimension later
         obs = self.link_states[link_state_key][link_index]
         
-        goal = np.array(self.goal[0][self.observed_link_state_keys[0]][link_index])
+        if self.dimensions == 2:
+            obs = obs[:3]
+        
+        # TODO reuse this if want to have multiple goals and goal keys in the future. simplify for now
+        # goal = [{
+        #     "position": [None for i in range(13)]
+        # }]
+        # goal[0]["position"][observed_link_indices[0]] = position_goal
+        # goal = np.array(self.goal[0][self.observed_link_state_keys[0]][link_index])
+        
+        goal = goal 
         obs = list(obs) 
         
         for i in goal:
@@ -171,7 +195,8 @@ class BaseManipulator(BenchmarkEnv):
         if self.COST == Cost.RL_REWARD:
             for state_key in self.observed_link_state_keys:
                 for link_index in self.observed_link_indices:
-                    goal = np.array(self.goal[0][state_key][link_index]) #TODO this is for point tracking only
+                    goal = np.array(goal)
+                    # goal = np.array(self.goal[0][state_key][link_index]) #TODO this is for point tracking only
                     state = np.array(self.link_states[state_key][link_index])
                     # rmse = np.sqrt(np.mean((goal-state)**2))
                     loss = np.sum(abs(goal-state))
@@ -226,11 +251,11 @@ class BaseManipulator(BenchmarkEnv):
         return obs
 
     def _setup_symbolic(self):
-        if self.control_mode == p.TORQUE_CONTROL:
+        if self.controlled_variable == p.TORQUE_CONTROL:
             # single joint 
             
             # use pendulum formula for now
-            
+
             g = self.GRAVITY_ACC
             dt = self.CTRL_TIMESTEP
             mc = 0.5
@@ -238,35 +263,41 @@ class BaseManipulator(BenchmarkEnv):
             # TODO express in terms of actual length (distance b.w 2 joints)
             l = 1
             I = 0 # moment of inertia from gears and motors
-            
+
             # must match dimension of X_GOAL and U_GOAL
-            nx = 1
+            nx = 2
             nu = 1 
-            
+
+            # x = cs.MX.sym('x')
+
             x_x = cs.MX.sym('x_x')
-            x_y = cs.MX.sym('x_y')
+            # x_y = cs.MX.sym('x_y')
             x_z = cs.MX.sym('x_z')
             theta = cs.MX.sym('theta')
             U = cs.MX.sym('U') # torque
             theta_dot_dot = cs.MX.sym("tdotdot")
-            Theta_dot_dot = cs.vertcat(theta_dot_dot, (U-(mc/2+ma)*g*l*cs.sin(theta))/((mc/3 + ma)*l^2+I))
-            
+            Theta_dot_dot = cs.vertcat(theta_dot_dot, (U-(mc/2+ma) * g * l * cs.sin(theta)) / ((mc/3 + ma)* l**2 + I))
+            # Theta_dot_dot = cs.MX.sym("ttt")
             # not sure
-            X = cs.vertcat(x_x, x_y, x_z)
-            Y = cs.vertcat(x_x, x_y, x_z)
-            
+            # X = cs.vertcat(theta)
+            X = cs.vertcat(theta)
+            Y = cs.vertcat(theta)
+
             Q = cs.MX.sym('Q', nx, nx)
             R = cs.MX.sym('R', nu, nu)
-        
+
             Xr = cs.MX.sym('Xr', nx, 1)
             Ur = cs.MX.sym('Ur', nu, 1)
 
-            cost_func = 0.5 * (X - Xr).T @ Q @ (X - Xr) + 0.5 * (U - Ur).T @ R @ (U - Ur)
-            
+            # convert angular to cartesian position 
+            x_x = l * cs.cos(theta)
+            x_z = l * cs.sin(theta) 
+
+            X_array = cs.vertcat(x_x, x_z)
+
+            cost_func = 0.5 * (X_array - Xr).T @ Q @ (X_array - Xr) + 0.5 * (U - Ur).T @ R @ (U - Ur)
+
             dynamics = {"dyn_eqn": Theta_dot_dot, "obs_eqn": Y, "vars": {"X": X, "U": U}}
             cost = {"cost_func": cost_func, "vars": {"X": X, "U": U, "Xr": Xr, "Ur": Ur, "Q": Q, "R": R}}
             self.symbolic = SymbolicModel(dynamics=dynamics, cost=cost, dt=dt)
             
-            # lqr uses fc_func 
-            # https://web.casadi.org/python-api/#function 
-        pass

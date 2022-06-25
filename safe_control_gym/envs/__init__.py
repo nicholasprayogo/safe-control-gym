@@ -10,3 +10,7 @@ register(id="cartpole",
 register(id="quadrotor",
          entry_point="safe_control_gym.envs.gym_pybullet_drones.quadrotor:Quadrotor",
          config_entry_point="safe_control_gym.envs.gym_pybullet_drones:quadrotor.yaml")
+
+register(id="manipulator",
+         entry_point="safe_control_gym.envs.manipulators.manipulator:BaseManipulator",
+         config_entry_point="safe_control_gym.envs.manipulators:manipulator.yaml")
