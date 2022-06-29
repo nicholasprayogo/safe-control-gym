@@ -39,7 +39,7 @@ data_dir: "./results/ilqr_baseline/"
 
 
 # Task (options: stabilization, traj_tracking)
-task: traj_tracking
+task: stabilization
 episode_len_sec: 5 # episode maximum length in seconds
 task_info: {
         "stabilization_goal": [0, 1],

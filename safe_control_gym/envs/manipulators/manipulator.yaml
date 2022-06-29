@@ -1,16 +1,18 @@
 urdf_path: ./safe_control_gym/envs/manipulators/assets/franka_panda/panda.urdf
 controlled_variable: torque
 goal_type : point
-connection : gui
+connection : direct
 control_method : classical
 dimensions : 2
 target_space: joint
-goal: [0.0212, 1.113]
-
+# goal: [-0.127, 1.113]
+goal: [2.5, 0]
 controlled_joint_indices: [6]
 observed_link_indices: [7]
 observed_link_state_keys: [position]
-
+tolerance: 15 
+# Task
+task: stabilization
 # Disturbances
 disturbances: null
 adversary_disturbance: null 

@@ -181,7 +181,12 @@ class iLQR(BaseController):
                 current_goal = self.x_0[self.k]
 
             # Compute input.
-            action = self.select_action(self.env.state, self.k)
+            # have condition where k > self.gains_fb.shape
+            try:
+                action = self.select_action(self.env.state, self.k)
+            except:
+                print("k exceeds gain matrix")
+                break
 
             # Save rollout data.
             if self.k == 0:
@@ -240,12 +245,12 @@ class iLQR(BaseController):
                         (self.ite_counter, info["episode"]["r"]), "green"))
                 print(colored("--------------------------", "green"))
 
-                # Break if the first iteration is not successful
-                if self.task == Task.STABILIZATION:
-                    if self.ite_counter == 0 and not info["goal_reached"]:
-                        print(colored("The initial policy might be unstable. "
-                                + "Break from iLQR updates.", "red"))
-                        break
+                # # Break if the first iteration is not successful
+                # if self.task == Task.STABILIZATION:
+                #     if self.ite_counter == 0 and not info["goal_reached"]:
+                #         print(colored("The initial policy might be unstable. "
+                #                 + "Break from iLQR updates.", "red"))
+                #         break
 
                 # Maximum episode length.
                 self.num_steps = np.shape(input_stack)[0]
@@ -325,6 +330,7 @@ class iLQR(BaseController):
 
                 # Reset environment.
                 print("Reset environment.")
+                self.env.close()
                 self.reset_env()
 
                 # Post analysis.
@@ -497,7 +503,7 @@ class iLQR(BaseController):
                 self.gains_fb = np.append(self.gains_fb, gains_fb.reshape(1, self.model.nu, self.model.nx), axis=0)
                 self.input_ff = np.append(self.input_ff, input_ff.reshape(self.model.nu, 1), axis=1)
         else:
-            print(k, self.gains_fb[k])
+            print(k, self.gains_fb[k], self.gains_fb.shape)
             action = self.gains_fb[k].dot(x) + self.input_ff[:, k]
 
         return action
@@ -576,6 +582,7 @@ class iLQR(BaseController):
         # Loop through episode.
         for self.ep_counter in range(self.eval_batch_size):
             # Initialize new environment for the test trial.
+            self.env.close()
             self.init_env()
 
             # Run iLQR for the particular initial condition.
