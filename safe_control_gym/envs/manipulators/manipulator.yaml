@@ -2,15 +2,24 @@ urdf_path: ./safe_control_gym/envs/manipulators/assets/franka_panda/panda.urdf
 controlled_variable: torque
 goal_type : point
 connection : direct
+
 control_method : classical
+cost: quadratic
+
+# dimension 1: theta
+# 2: theta, theta_dot
+# 3: x, y, z 
+
 dimensions : 2
 target_space: joint
 # goal: [-0.127, 1.113]
 goal: [2.5, 0]
+# goal: {"theta": 0.4, "theta_dot": 0.25}
 controlled_joint_indices: [6]
 observed_link_indices: [7]
-observed_link_state_keys: [position]
-tolerance: 15 
+observed_link_state_keys: [angular_pos]
+tolerance: 0.1
+# tolerance: 0.1
 # Task
 task: stabilization
 # Disturbances
@@ -19,7 +28,14 @@ adversary_disturbance: null
 adversary_disturbance_offset: 0.0
 adversary_disturbance_scale: 0.01
 # Constraints
-constraints: null
-done_on_violation: False
-use_constraint_penalty: False 
-constraint_penalty: -1 
+# cosntraints: null
+constraints:
+  - constraint_form: bounded_constraint
+    lower_bounds: [0] # should match state dim
+    upper_bounds: [2.6] 
+    constrained_variable: state
+    active_dims: [0]  # only position
+# done_on_violation: False
+# use_constraint_penalty: False 
+# constraint_penalty: -1 
+
